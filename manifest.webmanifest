@@ -1,0 +1,30 @@
+{
+  "name": "麻雀点数計算",
+  "short_name": "麻雀計算",
+  "description": "麻雀の点数計算・逆転条件・成績表・鳴き読み・序盤方針をサポートするアプリ",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0c472d",
+  "theme_color": "#171310",
+  "lang": "ja",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
