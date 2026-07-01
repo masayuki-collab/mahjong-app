@@ -374,12 +374,20 @@ input[type=number],select{padding:8px;border:1.5px solid #d8cfb2;border-radius:9
       <input type="number" id="s-kaeshi" value="30000" step="1000" style="width:100px" onchange="setRule()">
     </div>
     <div class="row"><span class="lbl">ウマ</span><div class="seg" id="seg-uma"></div></div>
-    <div class="hint">オカ（返し点−持ち点）×4 はトップに加算されます。ポイント＝(持ち点−返し点)÷1000＋ウマ（＋オカ）</div>
+    <div class="row"><span class="lbl">飛び賞</span>
+      <div class="stepper"><button onclick="stepTobi(-5)">−</button><span class="val" id="v-tobi">10</span><button onclick="stepTobi(5)">＋</button></div>
+      <span class="hint">pt。ハコテン（0点未満）が出たら、飛ばした人へ支払い。0でなし</span>
+    </div>
+    <div class="hint">オカ（返し点−持ち点）×4 はトップに加算されます。ポイント＝(持ち点−返し点)÷1000＋ウマ（＋オカ）（±飛び賞）</div>
   </div>
   <div class="card">
     <h3>✏️ 半荘の結果を入力</h3>
     <div id="entry-rows"></div>
     <div class="sumwarn" id="sum-warn"></div>
+    <div class="row" id="tobi-row" style="display:none;margin-top:8px">
+      <span class="lbl">飛ばした人</span>
+      <div class="radio-row" id="tobi-who"></div>
+    </div>
     <button class="btn pri" style="margin-top:10px" onclick="addHanchan()">この半荘を成績表に追加</button>
   </div>
   <div class="card">
@@ -1720,10 +1728,39 @@ function renderQT(){
 /* ================= 成績表タブ ================= */
 const UMA = { none: [0,0,0,0], u510: [10,5,-5,-10], u1020: [20,10,-10,-20], u1030: [30,10,-10,-30] };
 let SC = {
-  mochi: 25000, kaeshi: 30000, uma: "u1030",
+  mochi: 25000, kaeshi: 30000, uma: "u1030", tobi: 10,
   names: ["プレイヤー1","プレイヤー2","プレイヤー3","プレイヤー4"],
-  rows: []   // 各半荘: [s0,s1,s2,s3]
+  rows: []   // 各半荘: { s: [s0,s1,s2,s3], tobiTo: 飛ばした人のindex|null }
 };
+// 旧形式（配列のみ）の互換
+function rowOf(r){ return Array.isArray(r) ? { s: r, tobiTo: null } : r; }
+let entTobi = null;  // 入力中の「飛ばした人」
+
+function stepTobi(d){
+  SC.tobi = Math.max(0, Math.min(50, SC.tobi + d));
+  document.getElementById("v-tobi").textContent = SC.tobi;
+  saveState();
+  renderTobiRow();
+  renderScore();
+}
+function renderTobiRow(){
+  const row = document.getElementById("tobi-row");
+  const vals = entryVals();
+  const busted = [0,1,2,3].filter(i => !isNaN(vals[i]) && vals[i] < 0);
+  if (SC.tobi === 0 || busted.length === 0){
+    row.style.display = "none";
+    entTobi = null;
+    return;
+  }
+  row.style.display = "";
+  const candidates = [0,1,2,3].filter(i => !busted.includes(i));
+  if (entTobi === null || !candidates.includes(entTobi)){
+    entTobi = candidates.reduce((a, b) => (isNaN(vals[a]) ? -1e9 : vals[a]) >= (isNaN(vals[b]) ? -1e9 : vals[b]) ? a : b);
+  }
+  document.getElementById("tobi-who").innerHTML = candidates.map(i =>
+    `<button class="chip ${entTobi === i ? "on" : ""}" onclick="entTobi=${i};renderTobiRow()">${SC.names[i]}</button>`).join("") +
+    `<span class="hint" style="width:100%">ハコテンあり：飛び賞${SC.tobi}ptが飛んだ人→飛ばした人へ（トップ払いの場合はトップを選択）</span>`;
+}
 
 regSeg("seg-uma", ["none","u510","u1020","u1030"], ["なし","5-10","10-20","10-30"], () => SC.uma, v => { SC.uma = v; saveState(); }, renderScore);
 
@@ -1749,6 +1786,7 @@ function entryVals(){
 function checkEntrySum(){
   const el = document.getElementById("sum-warn");
   const vals = entryVals();
+  renderTobiRow();
   if (vals.some(isNaN)){ el.textContent = "4人分の持ち点を入力してください"; el.className = "sumwarn"; return; }
   const sum = vals.reduce((a, b) => a + b, 0);
   const expect = SC.mochi * 4;
@@ -1758,8 +1796,10 @@ function checkEntrySum(){
 function addHanchan(){
   const vals = entryVals();
   if (vals.some(isNaN)){ alert("4人分の持ち点を入力してください"); return; }
-  SC.rows.push(vals);
+  const hasBust = vals.some(v => v < 0);
+  SC.rows.push({ s: vals, tobiTo: (SC.tobi > 0 && hasBust) ? entTobi : null });
   [0,1,2,3].forEach(i => document.getElementById("ent-" + i).value = "");
+  entTobi = null;
   checkEntrySum();
   saveState();
   renderScore();
@@ -1776,7 +1816,8 @@ function resetScores(){
   renderScore();
 }
 // 1半荘分のポイント計算（同点は入力順＝起家に近い方が上位）
-function hanchanPts(scores){
+function hanchanPts(row){
+  const scores = row.s;
   const order = [0,1,2,3].sort((a, b) => scores[b] - scores[a] || a - b);
   const uma = UMA[SC.uma];
   const oka = (SC.kaeshi - SC.mochi) * 4 / 1000;
@@ -1784,6 +1825,12 @@ function hanchanPts(scores){
   order.forEach((pi, rank) => {
     pts[pi] = (scores[pi] - SC.kaeshi) / 1000 + uma[rank] + (rank === 0 ? oka : 0);
   });
+  // 飛び賞：ハコテン者 → 飛ばした人
+  if (SC.tobi > 0 && row.tobiTo !== null && row.tobiTo !== undefined){
+    scores.forEach((v, i) => {
+      if (v < 0 && i !== row.tobiTo){ pts[i] -= SC.tobi; pts[row.tobiTo] += SC.tobi; }
+    });
+  }
   return pts.map(x => Math.round(x * 10) / 10);
 }
 function fmtPt(x){
@@ -1794,6 +1841,7 @@ function renderScore(){
   document.getElementById("seg-uma")._sync();
   document.getElementById("s-mochi").value = SC.mochi;
   document.getElementById("s-kaeshi").value = SC.kaeshi;
+  document.getElementById("v-tobi").textContent = SC.tobi;
 
   const tbl = document.getElementById("score-table");
   if (SC.rows.length === 0){
@@ -1802,12 +1850,17 @@ function renderScore(){
   }
   const totals = [0,0,0,0];
   let body = "";
-  SC.rows.forEach((scores, ri) => {
-    const pts = hanchanPts(scores);
+  SC.rows.forEach((r, ri) => {
+    const row = rowOf(r);
+    const pts = hanchanPts(row);
     pts.forEach((p, i) => totals[i] += p);
-    body += `<tr><th>${ri + 1}</th>` + pts.map((p, i) =>
-      `<td><span class="pt ${p > 0 ? "plus" : p < 0 ? "minus" : ""}">${fmtPt(p)}</span><span class="raw">${scores[i].toLocaleString()}</span></td>`
-    ).join("") + `<td><button class="del" onclick="delHanchan(${ri})" title="この半荘を削除">×</button></td></tr>`;
+    const tobiApplied = SC.tobi > 0 && row.tobiTo !== null && row.tobiTo !== undefined && row.s.some(v => v < 0);
+    body += `<tr><th>${ri + 1}</th>` + pts.map((p, i) => {
+      let mark = "";
+      if (tobiApplied && row.s[i] < 0) mark = " 💥";
+      else if (tobiApplied && i === row.tobiTo) mark = " 🎯";
+      return `<td><span class="pt ${p > 0 ? "plus" : p < 0 ? "minus" : ""}">${fmtPt(p)}</span><span class="raw">${row.s[i].toLocaleString()}${mark}</span></td>`;
+    }).join("") + `<td><button class="del" onclick="delHanchan(${ri})" title="この半荘を削除">×</button></td></tr>`;
   });
   const rTotals = totals.map(t => Math.round(t * 10) / 10);
   const best = Math.max(...rTotals);
@@ -1816,7 +1869,7 @@ function renderScore(){
   ).join("") + `<td></td></tr>`;
   const head = `<tr><th>#</th>` + SC.names.map(n => `<th>${n}</th>`).join("") + `<th></th></tr>`;
   tbl.innerHTML = `<table>${head}${body}${totalRow}</table>
-    <div class="hint" style="margin-top:8px">${SC.rows.length}半荘・ウマ${{none:"なし",u510:"5-10",u1020:"10-20",u1030:"10-30"}[SC.uma]}・オカ${(SC.kaeshi - SC.mochi) * 4 / 1000}pt（同点は入力順で上位扱い）</div>`;
+    <div class="hint" style="margin-top:8px">${SC.rows.length}半荘・ウマ${{none:"なし",u510:"5-10",u1020:"10-20",u1030:"10-30"}[SC.uma]}・オカ${(SC.kaeshi - SC.mochi) * 4 / 1000}pt・飛び賞${SC.tobi > 0 ? SC.tobi + "pt（💥飛んだ人 → 🎯飛ばした人）" : "なし"}（同点は入力順で上位扱い）</div>`;
 }
 
 /* ================= 役一覧 ================= */
@@ -1896,7 +1949,7 @@ function showTab(name){
 function saveState(){
   try {
     localStorage.setItem("mj-app", JSON.stringify({
-      sc: { mochi: SC.mochi, kaeshi: SC.kaeshi, uma: SC.uma, names: SC.names, rows: SC.rows },
+      sc: { mochi: SC.mochi, kaeshi: SC.kaeshi, uma: SC.uma, tobi: SC.tobi, names: SC.names, rows: SC.rows },
       rules: RULES
     }));
   } catch(e){}
