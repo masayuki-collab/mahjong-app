@@ -363,6 +363,21 @@ input[type=number],select{padding:8px;border:1.5px solid #d8cfb2;border-radius:9
     <h3>満貫以上</h3>
     <div id="limit-table"></div>
   </div>
+
+  <div class="card">
+    <h3>🀄 清一色の待ちチェッカー</h3>
+    <div class="hint" style="margin-bottom:8px">1色だけのテンパイ形を入力すると、<b>アガれる牌（待ち）をすべて</b>表示します。ポン・チーしている場合は手の中の牌だけを入力（13・10・7・4・1枚に対応）。</div>
+    <div class="row"><span class="lbl">色</span><div class="seg" id="seg-czsuit"></div></div>
+    <div class="row"><span class="lbl">牌を追加</span>
+      <div class="numpick" id="cz-nums"></div>
+    </div>
+    <div id="cz-hand" style="display:flex;flex-wrap:wrap;gap:4px;min-height:48px;background:#e9f4ec;border-radius:10px;padding:8px;align-items:center;margin-bottom:6px"></div>
+    <div class="btnrow">
+      <button class="btn warn" style="padding:9px" onclick="czClear()">クリア</button>
+      <button class="btn sec" style="margin-top:0;padding:9px" onclick="czExample()">例：九蓮宝燈</button>
+    </div>
+    <div id="cz-out" style="margin-top:8px"></div>
+  </div>
 </section>
 
 <!-- ===== 成績表タブ ===== -->
@@ -1740,6 +1755,74 @@ function renderQT(){
   document.getElementById("limit-table").innerHTML = lh;
 }
 
+/* ================= 清一色 待ちチェッカー ================= */
+const CZ = { suit: 0, tiles: [] };   // tiles: 1〜9 の数字
+
+regSeg("seg-czsuit", [0,1,2], ["萬子","筒子","索子"], () => CZ.suit, v => CZ.suit = +v, renderCZ);
+function czAdd(n){
+  if (CZ.tiles.length >= 13){ alert("13枚までです"); return; }
+  if (CZ.tiles.filter(x => x === n).length >= 4) return;
+  CZ.tiles.push(n);
+  CZ.tiles.sort((a, b) => a - b);
+  renderCZ();
+}
+function czRemove(i){ CZ.tiles.splice(i, 1); renderCZ(); }
+function czClear(){ CZ.tiles = []; renderCZ(); }
+function czExample(){ CZ.tiles = [1,1,1,2,3,4,5,6,7,8,9,9,9]; renderCZ(); }
+
+// counts[1..9] がアガリ形（n面子1雀頭 or 七対子）か（engineのdecomposeを利用）
+function czComplete(counts){
+  const sum = counts.reduce((a, b) => a + b, 0);
+  const c34 = new Array(34).fill(0);
+  for (let i = 1; i <= 9; i++) c34[i - 1] = counts[i];
+  if (decompose(c34, (sum - 2) / 3).length > 0) return true;
+  if (sum === 14){
+    let pairs = 0, ok = true;
+    for (let i = 1; i <= 9; i++){
+      if (counts[i] === 2) pairs++;
+      else if (counts[i] !== 0){ ok = false; break; }
+    }
+    if (ok && pairs === 7) return true;
+  }
+  return false;
+}
+
+function renderCZ(){
+  document.getElementById("seg-czsuit")._sync();
+  const counts = new Array(10).fill(0);
+  CZ.tiles.forEach(n => counts[n]++);
+  document.getElementById("cz-nums").innerHTML = [1,2,3,4,5,6,7,8,9].map(n =>
+    `<button ${counts[n] >= 4 ? "disabled style='opacity:.3'" : ""} onclick="czAdd(${n})">${n}</button>`).join("");
+  document.getElementById("cz-hand").innerHTML = CZ.tiles.length === 0
+    ? `<span class="hint">ここに手牌が表示されます（タップで削除）</span>`
+    : CZ.tiles.map((n, i) => `<span onclick="czRemove(${i})" style="cursor:pointer">${mtile(n, CZ.suit)}</span>`).join("");
+
+  const out = document.getElementById("cz-out");
+  const len = CZ.tiles.length;
+  if (len === 0){ out.innerHTML = ""; return; }
+  if (len % 3 !== 1){
+    out.innerHTML = `<div class="hint">現在${len}枚。テンパイ形は <b>13枚（鳴きなし）・10枚（1副露）・7枚（2副露）・4枚（3副露）・1枚（4副露）</b>で入力してください。</div>`;
+    return;
+  }
+  const waits = [];
+  for (let t = 1; t <= 9; t++){
+    if (counts[t] >= 4) continue;
+    counts[t]++;
+    if (czComplete(counts)) waits.push(t);
+    counts[t]--;
+  }
+  if (waits.length === 0){
+    out.innerHTML = `<div class="err">ノーテンです（アガリ牌がありません）</div>`;
+    return;
+  }
+  const total = waits.reduce((s, t) => s + (4 - counts[t]), 0);
+  out.innerHTML = `<div class="nk2-row sfe"><span class="nk2-lab">待ち<br>${waits.length}種${total}枚</span>` +
+    waits.map(t => `<span style="text-align:center">${mtile(t, CZ.suit)}<span class="raw" style="display:block;font-size:10px;color:var(--sub)">残${4 - counts[t]}</span></span>`).join("") +
+    `</div>` +
+    (waits.length === 9 ? `<div class="ok-banner" style="margin-top:8px">純正九蓮宝燈の9面待ちです！🎉</div>` : "") +
+    `<div class="hint" style="margin-top:6px">「残n枚」は自分から見えていない最大枚数（他家の手牌・捨て牌は考慮していません）。</div>`;
+}
+
 /* ================= 成績表タブ ================= */
 const UMA = { none: [0,0,0,0], u510: [10,5,-5,-10], u1020: [20,10,-10,-20], u1030: [30,10,-10,-30] };
 let SC = {
@@ -2110,6 +2193,7 @@ renderHaipai();
 renderRoute();
 buildNK2();
 renderNK2();
+renderCZ();
 document.getElementById("sumbar").style.display = "";
 </script>
 <script>
