@@ -293,6 +293,8 @@ input[type=number],select{padding:8px;border:1.5px solid #d8cfb2;border-radius:9
     </div>
   </div>
 
+  <div id="cz-slot"></div>
+
   <div class="card">
     <h3><span class="stepnum">5</span>リーチ・ドラなど</h3>
     <div class="row"><span class="lbl">リーチ</span>
@@ -364,7 +366,8 @@ input[type=number],select{padding:8px;border:1.5px solid #d8cfb2;border-radius:9
     <div id="limit-table"></div>
   </div>
 
-  <div class="card">
+  <div id="cz-home">
+  <div class="card" id="cz-card">
     <h3>🀄 清一色の待ちチェッカー</h3>
     <div class="hint" style="margin-bottom:8px">1色だけのテンパイ形を入力すると、<b>アガれる牌（待ち）をすべて</b>表示します。ポン・チーしている場合は手の中の牌だけを入力（13・10・7・4・1枚に対応）。</div>
     <div class="row"><span class="lbl">色</span><div class="seg" id="seg-czsuit"></div></div>
@@ -377,6 +380,7 @@ input[type=number],select{padding:8px;border:1.5px solid #d8cfb2;border-radius:9
       <button class="btn sec" style="margin-top:0;padding:9px" onclick="czExample()">例：九蓮宝燈</button>
     </div>
     <div id="cz-out" style="margin-top:8px"></div>
+  </div>
   </div>
 </section>
 
@@ -1200,6 +1204,20 @@ function refresh(){
   renderResult();
   renderCondInputs();
   renderCond();
+  placeCZ();
+}
+
+// 清一色チップ選択時は計算タブの④の下にチェッカーを表示（それ以外は早見表タブに戻す）
+function placeCZ(){
+  const card = document.getElementById("cz-card");
+  const slot = document.getElementById("cz-slot");
+  const home = document.getElementById("cz-home");
+  if (!card || !slot || !home) return;
+  if (W.yaku.chinitsu){
+    if (card.parentNode !== slot) slot.appendChild(card);
+  } else {
+    if (card.parentNode !== home) home.appendChild(card);
+  }
 }
 
 function renderResult(){
