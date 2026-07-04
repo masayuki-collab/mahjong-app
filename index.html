@@ -179,6 +179,8 @@ tr.total td{background:#fbf0d2;font-weight:800;font-size:14px;color:#5a431a;bord
 tr.total td .pt{font-size:15px}
 .del{border:none;background:none;color:var(--red);font-weight:800;cursor:pointer;font-size:16px;padding:2px 6px}
 .crown{color:var(--gold-deep)}
+details.ses{background:#fffdf6;border:1px solid #e0d7ba;border-radius:11px;padding:9px 12px;margin-top:9px}
+details.ses summary{font-size:13px;color:var(--ink);font-weight:700;padding:2px 0}
 
 /* ---- 条件計算 ---- */
 .crow{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 6px;border-bottom:1px solid #e7ddbd}
@@ -391,9 +393,22 @@ input[type=number],select{padding:8px;border:1.5px solid #d8cfb2;border-radius:9
     <button class="btn pri" style="margin-top:10px" onclick="addHanchan()">この半荘を成績表に追加</button>
   </div>
   <div class="card">
-    <h3>📋 成績表</h3>
+    <h3>📋 成績表（今回の対局）</h3>
     <div id="score-table"></div>
-    <button class="btn warn" style="margin-top:10px" onclick="resetScores()">成績表をリセット</button>
+    <button class="btn pri" style="margin-top:10px" onclick="saveSession()">💾 この対局を保存して締める</button>
+    <button class="btn warn" onclick="resetScores()">保存せずリセット</button>
+  </div>
+
+  <div class="card">
+    <h3>📚 過去の対戦成績（通算）</h3>
+    <div id="agg-table"></div>
+    <div id="session-list"></div>
+    <div class="btnrow" style="margin-top:10px">
+      <button class="btn sec" style="margin-top:0" onclick="exportData()">エクスポート</button>
+      <button class="btn sec" style="margin-top:0" onclick="document.getElementById('imp-file').click()">インポート</button>
+    </div>
+    <input type="file" id="imp-file" accept=".json,application/json" style="display:none" onchange="importData(event)">
+    <div class="hint" style="margin-top:8px">データはこの端末のブラウザに自動保存されます。機種変更や共有にはエクスポート（JSONファイル）を使ってください。</div>
   </div>
 </section>
 
@@ -1872,6 +1887,125 @@ function renderScore(){
     <div class="hint" style="margin-top:8px">${SC.rows.length}半荘・ウマ${{none:"なし",u510:"5-10",u1020:"10-20",u1030:"10-30"}[SC.uma]}・オカ${(SC.kaeshi - SC.mochi) * 4 / 1000}pt・飛び賞${SC.tobi > 0 ? SC.tobi + "pt（💥飛んだ人 → 🎯飛ばした人）" : "なし"}（同点は入力順で上位扱い）</div>`;
 }
 
+/* ---- 対局の保存・通算成績 ---- */
+let ARC = [];   // 保存された対局: {date, names, rows, rowsPts, totals, settings}
+
+function saveSession(){
+  if (SC.rows.length === 0){ alert("保存する半荘がありません。先に半荘の結果を追加してください。"); return; }
+  if (!confirm(`${SC.rows.length}半荘を保存して、新しい対局を始めます。よろしいですか？`)) return;
+  const totals = [0,0,0,0];
+  const rows = SC.rows.map(rowOf);
+  const rowsPts = rows.map(r => {
+    const p = hanchanPts(r);
+    p.forEach((x, i) => totals[i] += x);
+    return p;
+  });
+  ARC.push({
+    date: new Date().toISOString(),
+    names: SC.names.slice(),
+    rows, rowsPts,
+    totals: totals.map(t => Math.round(t * 10) / 10),
+    settings: { mochi: SC.mochi, kaeshi: SC.kaeshi, uma: SC.uma, tobi: SC.tobi }
+  });
+  SC.rows = [];
+  saveState();
+  renderScore();
+  renderHistory();
+}
+function delSession(i){
+  if (!confirm("この対局の記録を完全に削除します。よろしいですか？")) return;
+  ARC.splice(i, 1);
+  saveState();
+  renderHistory();
+}
+function fmtDate(iso){
+  const d = new Date(iso);
+  return `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,"0")}`;
+}
+function renderHistory(){
+  const aggEl = document.getElementById("agg-table");
+  const listEl = document.getElementById("session-list");
+  if (ARC.length === 0){
+    aggEl.innerHTML = `<div class="hint">保存された対局はまだありません。「この対局を保存して締める」で記録が貯まっていきます。</div>`;
+    listEl.innerHTML = "";
+    return;
+  }
+  // 通算集計（プレイヤー名で集計）
+  const agg = {};
+  ARC.forEach(a => {
+    a.names.forEach((n, i) => {
+      if (!agg[n]) agg[n] = { ses: 0, han: 0, pt: 0, ranks: [0,0,0,0], tobi: 0 };
+      agg[n].ses++;
+      agg[n].pt += a.totals[i];
+    });
+    a.rows.forEach(r => {
+      const s = r.s;
+      const order = [0,1,2,3].sort((x, y) => s[y] - s[x] || x - y);
+      order.forEach((pi, rank) => {
+        const nm = a.names[pi];
+        agg[nm].han++;
+        agg[nm].ranks[rank]++;
+        if (s[pi] < 0) agg[nm].tobi++;
+      });
+    });
+  });
+  const players = Object.keys(agg).sort((a, b) => agg[b].pt - agg[a].pt);
+  const bestPt = Math.max(...players.map(n => Math.round(agg[n].pt * 10) / 10));
+  aggEl.innerHTML = `<table><tr><th>プレイヤー</th><th>対局</th><th>半荘</th><th>合計pt</th><th>平均順位</th><th>1位</th><th>飛び</th></tr>` +
+    players.map(n => {
+      const g = agg[n];
+      const pt = Math.round(g.pt * 10) / 10;
+      const avg = g.han ? (g.ranks.reduce((s, c, r) => s + c * (r + 1), 0) / g.han).toFixed(2) : "-";
+      return `<tr><th>${pt === bestPt ? "👑 " : ""}${n}</th><td>${g.ses}</td><td>${g.han}</td>` +
+        `<td class="${pt > 0 ? "" : ""}"><span class="pt ${pt > 0 ? "plus" : pt < 0 ? "minus" : ""}">${fmtPt(pt)}</span></td>` +
+        `<td>${avg}</td><td>${g.ranks[0]}回</td><td>${g.tobi}回</td></tr>`;
+    }).join("") + `</table>`;
+
+  // 対局リスト（新しい順）
+  listEl.innerHTML = ARC.map((a, i) => {
+    const topIdx = a.totals.indexOf(Math.max(...a.totals));
+    const head = `<tr><th>#</th>${a.names.map(n => `<th>${n}</th>`).join("")}</tr>`;
+    const body = a.rowsPts.map((pts, ri) =>
+      `<tr><th>${ri + 1}</th>${pts.map((p, pi) =>
+        `<td><span class="pt ${p > 0 ? "plus" : p < 0 ? "minus" : ""}">${fmtPt(p)}</span><span class="raw">${a.rows[ri].s[pi].toLocaleString()}</span></td>`).join("")}</tr>`).join("");
+    const totalRow = `<tr class="total"><th>計</th>${a.totals.map(t =>
+      `<td><span class="pt ${t > 0 ? "plus" : t < 0 ? "minus" : ""}">${fmtPt(t)}</span></td>`).join("")}</tr>`;
+    return `<details class="ses">
+      <summary>🀄 ${fmtDate(a.date)}（${a.rows.length}半荘）トップ: ${a.names[topIdx]} ${fmtPt(a.totals[topIdx])}</summary>
+      <div style="margin-top:8px"><table>${head}${body}${totalRow}</table></div>
+      <button class="btn warn" style="margin-top:8px;padding:8px" onclick="delSession(${i})">この対局を削除</button>
+    </details>`;
+  }).reverse().join("");
+}
+function exportData(){
+  if (typeof URL.createObjectURL !== "function"){ alert("この環境ではエクスポートできません"); return; }
+  const blob = new Blob([JSON.stringify({ app: "mahjong-app", exported: new Date().toISOString(), arc: ARC }, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "mahjong-records.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function importData(ev){
+  const f = ev.target.files[0];
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const d = JSON.parse(rd.result);
+      if (!Array.isArray(d.arc)) throw new Error("bad format");
+      if (!confirm(`${d.arc.length}件の対局記録を読み込み、現在の過去成績に追加します。よろしいですか？`)) return;
+      ARC = ARC.concat(d.arc);
+      saveState();
+      renderHistory();
+    } catch(e){
+      alert("ファイルを読み込めませんでした（エクスポートしたJSONファイルを選んでください）");
+    }
+  };
+  rd.readAsText(f);
+  ev.target.value = "";
+}
+
 /* ================= 役一覧 ================= */
 const YAKU_DATA = [
   ["1翻", [
@@ -1940,7 +2074,7 @@ function showTab(name){
   document.getElementById("nav-" + name).classList.add("on");
   document.getElementById("sumbar").style.display = name === "calc" ? "" : "none";
   if (name === "table") renderQT();
-  if (name === "score") renderScore();
+  if (name === "score"){ renderScore(); renderHistory(); }
   if (name === "cond") renderCond();
   if (name === "opening"){ renderHaipai(); renderRoute(); }
   if (name === "naki"){ renderNaki(); renderNK2(); }
@@ -1950,6 +2084,7 @@ function saveState(){
   try {
     localStorage.setItem("mj-app", JSON.stringify({
       sc: { mochi: SC.mochi, kaeshi: SC.kaeshi, uma: SC.uma, tobi: SC.tobi, names: SC.names, rows: SC.rows },
+      arc: ARC,
       rules: RULES
     }));
   } catch(e){}
@@ -1958,6 +2093,7 @@ function loadState(){
   try {
     const d = JSON.parse(localStorage.getItem("mj-app"));
     if (d && d.sc) Object.assign(SC, d.sc);
+    if (d && Array.isArray(d.arc)) ARC = d.arc;
     if (d && d.rules) Object.assign(RULES, d.rules);
   } catch(e){}
 }
@@ -1966,6 +2102,7 @@ loadState();
 renderYakuList();
 renderEntry();
 renderScore();
+renderHistory();
 renderQT();
 refresh();
 renderNaki();
