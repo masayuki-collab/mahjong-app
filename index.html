@@ -419,6 +419,23 @@ input[type=number],select{padding:8px;border:1.5px solid #d8cfb2;border-radius:9
   </div>
 
   <div class="card">
+    <h3>💴 金額精算（レート・場代・食事代）</h3>
+    <div class="row"><span class="lbl">レート</span>
+      <input type="number" id="m-rate" step="1" style="width:80px" oninput="setMoney()">
+      <span class="hint">円/pt（合計ptに掛ける。点5＝5）</span>
+    </div>
+    <div class="yakugrid" id="rate-presets" style="margin-bottom:8px"></div>
+    <div class="row"><span class="lbl">場代（全員）</span>
+      <input type="number" id="m-basedai" step="100" style="width:100px" oninput="setMoney()">
+      <span class="hint">円/人・全員から差引</span>
+    </div>
+    <div class="row" style="align-items:flex-start"><span class="lbl">食事代など</span>
+      <div id="meal-rows" style="flex:1"></div>
+    </div>
+    <div id="money-out" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
     <h3>📚 過去の対戦成績（通算）</h3>
     <div id="agg-table"></div>
     <div id="session-list"></div>
@@ -1845,6 +1862,7 @@ function renderCZ(){
 const UMA = { none: [0,0,0,0], u510: [10,5,-5,-10], u1020: [20,10,-10,-20], u1030: [30,10,-10,-30] };
 let SC = {
   mochi: 25000, kaeshi: 30000, uma: "u1030", tobi: 10,
+  rate: 5, basedai: 0, meal: [0,0,0,0],
   names: ["プレイヤー1","プレイヤー2","プレイヤー3","プレイヤー4"],
   rows: []   // 各半荘: { s: [s0,s1,s2,s3], tobiTo: 飛ばした人のindex|null }
 };
@@ -1920,6 +1938,66 @@ function addHanchan(){
   saveState();
   renderScore();
 }
+
+/* ---- 金額精算 ---- */
+function fmtYen(n){ n = Math.round(n); return (n < 0 ? "−" : "") + "¥" + Math.abs(n).toLocaleString(); }
+function setMoney(){
+  SC.rate = parseFloat(document.getElementById("m-rate").value) || 0;
+  SC.basedai = parseInt(document.getElementById("m-basedai").value) || 0;
+  saveState();
+  renderMoneyOut();
+  document.querySelectorAll("#rate-presets .chip").forEach(c => c.classList.toggle("on", +c.dataset.r === SC.rate));
+}
+function setRate(r){
+  SC.rate = r;
+  document.getElementById("m-rate").value = r;
+  saveState();
+  renderMoney();
+}
+function setMeal(i, v){
+  SC.meal[i] = parseInt(v) || 0;
+  saveState();
+  renderMoneyOut();
+}
+function currentTotals(){
+  const totals = [0,0,0,0];
+  SC.rows.forEach(r => { const p = hanchanPts(rowOf(r)); p.forEach((x, i) => totals[i] += x); });
+  return totals.map(t => Math.round(t * 10) / 10);
+}
+function renderMoney(){
+  document.getElementById("m-rate").value = SC.rate;
+  document.getElementById("m-basedai").value = SC.basedai;
+  document.getElementById("rate-presets").innerHTML = [1,3,5,10,50,100].map(r =>
+    `<button class="chip ${SC.rate === r ? "on" : ""}" data-r="${r}" onclick="setRate(${r})">${r}円/pt</button>`).join("");
+  document.getElementById("meal-rows").innerHTML = SC.names.map((n, i) =>
+    `<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+      <span style="width:92px;font-size:13px;color:var(--ink)">${n}</span>
+      <input type="number" step="100" style="width:96px" value="${SC.meal[i] || 0}" oninput="setMeal(${i},this.value)">
+      <span class="hint">円</span></div>`).join("");
+  renderMoneyOut();
+}
+function renderMoneyOut(){
+  const out = document.getElementById("money-out");
+  if (!out) return;
+  if (SC.rows.length === 0){
+    out.innerHTML = `<div class="hint">半荘を追加すると、合計ptから金額を計算します。</div>`;
+    return;
+  }
+  const rt = currentTotals();
+  let body = "", extern = 0, sumNet = 0;
+  rt.forEach((t, i) => {
+    const ptMoney = Math.round(t * SC.rate);
+    const meal = SC.meal[i] || 0;
+    const net = ptMoney - SC.basedai - meal;
+    extern += SC.basedai + meal;
+    sumNet += net;
+    body += `<tr><th>${SC.names[i]}</th><td>${fmtPt(t)}</td><td>${fmtYen(ptMoney)}</td>` +
+      `<td>${SC.basedai ? fmtYen(-SC.basedai) : "0"}</td><td>${meal ? fmtYen(-meal) : "0"}</td>` +
+      `<td><span class="pt ${net > 0 ? "plus" : net < 0 ? "minus" : ""}">${net > 0 ? "+" : ""}${fmtYen(net)}</span></td></tr>`;
+  });
+  out.innerHTML = `<table><tr><th>プレイヤー</th><th>合計pt</th><th>点数分</th><th>場代</th><th>食事代</th><th>最終</th></tr>${body}</table>
+    <div class="hint" style="margin-top:8px">レート ${SC.rate}円/pt。場代・食事代の合計 <b>${fmtYen(extern)}</b> が場に支払われます（点数分はプレイヤー間で差引ゼロ・端数四捨五入）。</div>`;
+}
 function delHanchan(i){
   SC.rows.splice(i, 1);
   saveState();
@@ -1928,6 +2006,7 @@ function delHanchan(i){
 function resetScores(){
   if (!confirm("成績表をすべて削除します。よろしいですか？")) return;
   SC.rows = [];
+  SC.meal = [0,0,0,0];
   saveState();
   renderScore();
 }
@@ -1958,6 +2037,7 @@ function renderScore(){
   document.getElementById("s-mochi").value = SC.mochi;
   document.getElementById("s-kaeshi").value = SC.kaeshi;
   document.getElementById("v-tobi").textContent = SC.tobi;
+  renderMoney();
 
   const tbl = document.getElementById("score-table");
   if (SC.rows.length === 0){
@@ -2009,6 +2089,7 @@ function saveSession(){
     settings: { mochi: SC.mochi, kaeshi: SC.kaeshi, uma: SC.uma, tobi: SC.tobi }
   });
   SC.rows = [];
+  SC.meal = [0,0,0,0];
   saveState();
   renderScore();
   renderHistory();
@@ -2184,7 +2265,7 @@ function showTab(name){
 function saveState(){
   try {
     localStorage.setItem("mj-app", JSON.stringify({
-      sc: { mochi: SC.mochi, kaeshi: SC.kaeshi, uma: SC.uma, tobi: SC.tobi, names: SC.names, rows: SC.rows },
+      sc: { mochi: SC.mochi, kaeshi: SC.kaeshi, uma: SC.uma, tobi: SC.tobi, rate: SC.rate, basedai: SC.basedai, meal: SC.meal, names: SC.names, rows: SC.rows },
       arc: ARC,
       rules: RULES
     }));
@@ -2194,6 +2275,9 @@ function loadState(){
   try {
     const d = JSON.parse(localStorage.getItem("mj-app"));
     if (d && d.sc) Object.assign(SC, d.sc);
+    if (!Array.isArray(SC.meal) || SC.meal.length !== 4) SC.meal = [0,0,0,0];
+    if (typeof SC.rate !== "number") SC.rate = 5;
+    if (typeof SC.basedai !== "number") SC.basedai = 0;
     if (d && Array.isArray(d.arc)) ARC = d.arc;
     if (d && d.rules) Object.assign(RULES, d.rules);
   } catch(e){}
